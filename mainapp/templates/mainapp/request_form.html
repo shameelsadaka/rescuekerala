@@ -2,6 +2,12 @@
 {% load bootstrap3 %}
 {% load static %}
 {% block css %}
+
+<head>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/openlayers/openlayers.github.io@master/en/v6.3.1/css/ol.css" type="text/css">
+  <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v4.5.1/mapbox-gl-geocoder.css" type="text/css"/>
+
+
   <style type="text/css">
     body, html, #place_modal_map {
       height: 100%;
@@ -28,6 +34,28 @@
     .pac-container{
       z-index: 10000 !important;
     }
+
+
+    /* Mapbox */
+    #geocoder {
+      z-index: 1;
+      width: 100%;
+    }
+    .mapboxgl-ctrl-geocoder {
+      min-width: 100%;
+    }
+
+    .mapboxgl-ctrl-geocoder .suggestions{
+      position: initial;
+      margin-bottom: 10px;
+    }
+    .mapboxgl-ctrl-geocoder, .mapboxgl-ctrl-geocoder .suggestions{
+      box-shadow: none;    
+    }
+    .mapboxgl-ctrl-geocoder{
+      border: 1px solid #ccc;
+    }
+    
   </style>
 {% endblock %}
 
@@ -87,8 +115,9 @@
       </div>
       <div class="modal-body" id="placePickerBody">
         <label>Search your location</label>
-        <input name="auto-complete-location" type="text" class="textbox controls form-control" placeholder="Example: Thrissur" title="" id="inp_location_search">
-        <label> or enter comma seperated GPS coordinates: </label>
+        <div id="geocoder"></div>
+        <!-- <input name="auto-complete-location" type="text" class="textbox controls form-control" placeholder="Example: Thrissur" title="" id="inp_location_search" > -->
+        <label style="margin-top:6px"> or enter comma seperated GPS coordinates: </label>
         <div class="input-group">
         <input type="text" class="form-control" id="manual_coordinates" placeholder="Example: 10.5276,76.2144">
           <span class="input-group-btn">
@@ -108,9 +137,19 @@
 
 
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+  <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v4.5.1/mapbox-gl-geocoder.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/openlayers/openlayers.github.io@master/en/v6.3.1/build/ol.js"></script>
+  
   <script type="text/javascript">
   try {
     var modalMap;
+
+    
+
+    ///
+    /// Toggle Requirements textbox display according to checkbox.
+    /// 
+
     window.addEventListener('load', checkVisibility, false);
     var checkboxes = document.querySelectorAll("input[type=checkbox]");
     for(var i=0; i< checkboxes.length; i++) {
@@ -189,8 +228,16 @@
       var latLng = $('#id_latlng').val().split(',');
       $('#id_latlng_accuracy').val('5 Meters');
       displayAddress(latLng[0].trim(), latLng[1].trim());
-    });
-  }
+    })
+    .on('shown.bs.modal', function(){
+        modalMap.updateSize(); // Rerender map while opening modal
+    })
+    
+  } /* window.onload end */
+
+
+
+
 
   $('#location-manually').on('click', function(event){
     event.preventDefault();
@@ -211,54 +258,46 @@
   }
 
   function initializeModalMap(lat, lng, zoom) {
-    var mapOptions = {
+    var mapViewOptions = {
       zoom: zoom || 14,
-      center: new google.maps.LatLng(lat, lng),
-      mapTypeId: google.maps.MapTypeId.ROADMAP,
-      fullscreenControl: false,
-      gestureHandling: 'greedy'
+      center: ol.proj.fromLonLat([lng,lat]),
     };
-    modalMap = new google.maps.Map(document.getElementById('place_modal_map'),
-      mapOptions);
-    google.maps.event.addListener(modalMap,'center_changed', function() {
-      $('#id_latlng').val(modalMap.getCenter().lat() + ',' +  modalMap.getCenter().lng());
-      $('#manual_coordinates').val(modalMap.getCenter().lat() + ',' +  modalMap.getCenter().lng());
-    });
-    $('<div/>').addClass('centerMarker').appendTo(modalMap.getDiv())
-      //do something onclick
-      .click(function() {
-        var that = $(this);
-        if (!that.data('win')) {
-          that.data('win', new google.maps.InfoWindow({
-            content: 'this is the center'
-          }));
-          that.data('win').bindTo('position', modalMap, 'center');
-        }
-        that.data('win').open(modalMap);
-      });
+    
+    modalMap = new ol.Map({
+      target: 'place_modal_map',
+      layers: [
+        new ol.layer.Tile({
+          source: new ol.source.OSM()
+        })
+      ],
+      view: new ol.View(mapViewOptions)
+    })
+    modalMap.on('moveend', handleMapMove);
   }
+
+
   function refreshMap(lat, lng, zoom){
-    var mapOptions = {
-      zoom: zoom,
-      center: new google.maps.LatLng(lat, lng)
+    var mapViewOptions = {
+      zoom: zoom || 14,
+      center: ol.proj.fromLonLat([lng,lat]),
     };
-    modalMap.setOptions(mapOptions);
+    modalMap.setView(new ol.View(mapViewOptions));
   }
 
   function displayAddress(lat, lng) {
     $.get('https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + lat + '&lon=' + lng + '&zoom=18&addressdetails=1')
-          .done(function(response) {
-            if($('#id_latlng_display').length === 0){
-              var inputElem = $('<input class="form-control" id="id_latlng_display" readonly="true">');
-              $('#id_latlng').before(inputElem);
-              $('#id_latlng').hide();
-              inputElem.click(showLocationPopup);
-            }
-            $('#id_latlng_display').val(response.display_name);
-          })
-          .fail(function(err){
-            console.log(err);
-          });
+      .done(function(response) {
+        if($('#id_latlng_display').length === 0){
+          var inputElem = $('<input class="form-control" id="id_latlng_display" readonly="true">');
+          $('#id_latlng').before(inputElem);
+          $('#id_latlng').hide();
+          inputElem.click(showLocationPopup);
+        }
+        $('#id_latlng_display').val(response.display_name);
+      })
+      .fail(function(err){
+        console.log(err);
+      });
   }
 
   function loadManualGps() {
@@ -276,20 +315,35 @@
     $('#inp_location_search').val('(Manually selected)');
   }
 
+
   function loadPlacePicker(){
-    var inputElem = document.getElementById('inp_location_search');
-    var autocomplete = new google.maps.places.Autocomplete(inputElem);
-    autocomplete.setFields(['address_components', 'geometry', 'icon', 'name']);
-    autocomplete.addListener('place_changed', function() {
-      var place = autocomplete.getPlace();
-      var lat = place.geometry.location.lat();
-      var lon = place.geometry.location.lng();
-      refreshMap(lat, lon, 14);
+    var locationInputId = "#inp_location_search";
+    accessToken = 'ACCESS_TOKEN_HERE';
+    var geocoder = new MapboxGeocoder({
+      accessToken: accessToken,
+      types: 'country,region,place,postcode,locality,neighborhood',
+      country:'India'
     });
+    geocoder.addTo('#geocoder');
+    geocoder.on('result',function(r){
+      coordinates = r.result.geometry.coordinates;
+      refreshMap(coordinates[1],coordinates[0])
+    });
+  }
+
+  function handleMapMove(evt) {
+    var map = evt.map;
+    var extent = map.getView().calculateExtent(map.getSize());
+    var center = ol.extent.getCenter(extent);
+    var lonLat = ol.proj.toLonLat(center);
+    var lonLatString = lonLat[1] + ',' + lonLat[0];
+    $('#id_latlng').val(lonLatString);
+    $('#manual_coordinates').val(lonLatString);
 
   }
 
+  
   </script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDdPKYd4vwgQY-OmF0Vn22wJu0EcDyi1MQ&libraries=places"  async defer></script>
+  
 
 {% endblock %}
